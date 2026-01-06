@@ -397,8 +397,8 @@ def llm_call(state: State, config: RunnableConfig, *, store: BaseStore):
     agent_summary = store.search((user_id, agent_summary_namespace))
     # Concatenate the memories
     agent_summary_str = concatenate_memories(agent_summary)
-    print("\n")
-    print(state.messages)
+    # print("\n")
+    # print(state.messages)
     new_messages = chain.invoke(
         {
             "messages": state.messages, 
@@ -429,9 +429,9 @@ def update_user_memory(state: State, config: RunnableConfig, *, store: BaseStore
     # generate new summary
     memory = user_summary_chain.invoke({"messages": human_messages, "summary": prev_summary_str})
     memory_text = memory.content if hasattr(memory, "content") else memory
-    print("\n")
-    print("User Summary:")
-    print(memory_text)
+    # print("\n")
+    # print("User Summary:")
+    # print(memory_text)
     # store new summary inside namespace and InMemoryStore.
     store.put(namespace, memory_id, {"memory": memory_text})
 
@@ -449,9 +449,9 @@ def update_agent_memory(state: State, config: RunnableConfig, *, store: BaseStor
     prev_summary_str = concatenate_memories(prev_summary)
     memory = agent_summary_chain.invoke({"messages": state.messages, "agent_summary": prev_summary_str})
     memory_text = memory.content if hasattr(memory, "content") else memory
-    print("\n")
-    print("Agent Summary:")
-    print(memory_text)
+    # print("\n")
+    # print("Agent Summary:")
+    # print(memory_text)
     store.put(namespace, memory_id, {"memory": memory_text})
 
 
@@ -502,51 +502,193 @@ config = {"configurable": {"thread_id": "1", "user_id": "1"}}
 config_2 = {"configurable": {"thread_id": "2", "user_id": "1"}}
 
 
-def main():
-    """Main function to run the chatbot with example queries."""
+def print_help():
+    """Print available commands."""
+    print("\n" + "=" * 60)
+    print("📋 Available Commands:")
     print("=" * 60)
-    print("🌍 Travel Planner Chatbot - Starting...")
+    print("  /quit or /exit    - End the conversation and exit")
+    print("  /new              - Start a new conversation thread")
+    print("  /thread <id>      - Switch to a specific thread ID")
+    print("  /history          - Show conversation history")
+    print("  /clear            - Clear the screen")
+    print("  /help             - Show this help message")
+    print("  /samples          - Show sample prompts for testing")
+    print("=" * 60 + "\n")
+
+
+def print_sample_prompts():
+    """Print sample prompts for testing long-term memory."""
+    print("\n" + "=" * 60)
+    print("🧪 Sample Prompts for Testing Long-Term Memory")
+    print("=" * 60)
+    print("""
+SESSION 1 - Establish User Preferences:
+----------------------------------------
+1. "Hi, my name is Alex and I love beach vacations."
+2. "I prefer budget-friendly hotels under $100/night."
+3. "I'm interested in cultural activities and local food."
+4. "Can you check the weather in Bali for July 2026?"
+5. "Find me some hotels in Bali."
+
+Then type /quit to exit.
+
+SESSION 2 - Test Memory Recall (use same user_id):
+--------------------------------------------------
+1. "Hello! Do you remember my name?"
+2. "What kind of vacations do I prefer?"
+3. "Plan a trip for me - you should know my preferences."
+4. "What was the weather like in Bali that you found earlier?"
+
+SESSION 3 - Update Preferences:
+-------------------------------
+1. "Actually, I now prefer luxury hotels."
+2. "I've also become interested in adventure activities."
+3. "Can you suggest activities in Bali based on my interests?"
+
+SESSION 4 - Verify Updated Memory:
+----------------------------------
+1. "What are my hotel preferences now?"
+2. "What activities do I enjoy?"
+3. "Plan another trip keeping my updated preferences in mind."
+
+CROSS-THREAD MEMORY TEST:
+-------------------------
+Start a NEW thread (/new) but use same user_id:
+1. "Hi there! What do you know about me?"
+   (Should recall user preferences from long-term memory)
+2. "What trips have you helped me plan before?"
+   (Agent summary should have this info)
+""")
+    print("=" * 60 + "\n")
+
+
+def main():
+    """Main function to run the interactive chatbot."""
+    import uuid
+    
+    print("\n" + "=" * 60)
+    print("🌍 Travel Planner Chatbot - Interactive Mode")
+    print("=" * 60)
     print(f"📦 Connected to MongoDB: {MONGODB_URI}")
     print(f"📁 Database: {DB_NAME}")
     print("=" * 60)
     
+    # Get user ID (persists across sessions for long-term memory)
+    print("\n👤 Enter your user ID (or press Enter for default 'user1'):")
+    user_id = input("User ID: ").strip() or "user1"
+    
+    # Generate or get thread ID
+    print(f"\n🧵 Enter thread ID (or press Enter to create new thread):")
+    thread_id = input("Thread ID: ").strip() or str(uuid.uuid4())[:8]
+    
+    current_config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    language = "English"
+    
+    print("\n" + "=" * 60)
+    print(f"✅ Session started!")
+    print(f"   User ID: {user_id}")
+    print(f"   Thread ID: {thread_id}")
+    print("=" * 60)
+    print("\n💡 Type /help to see available commands")
+    print("💬 Start chatting! Type your message and press Enter.\n")
+    
     try:
-        # Example: Weather query - First conversation
-        print("\n🗣️ First message in conversation thread 1...")
-        response = graph.invoke({
-            "messages": [
-                HumanMessage(content="Hi can you tell me about the weather in bali from 25th July 2026 to 30th July 2026?"),
-            ], 
-            "language": "English"
-        }, config=config)
-
-        print("\n" + "=" * 60)
-        print("📨 Response Messages:")
-        print("=" * 60)
-        for message in response["messages"]:
-            print(message.content)
-            print("-" * 40)
-
-        # Example: Continue the same conversation - demonstrating persistence
-        print("\n🗣️ Continuing conversation thread 1 (agent remembers context)...")
-        response2 = graph.invoke({
-            "messages": [
-                HumanMessage(content="What hotels are available there?"),
-            ], 
-            "language": "English"
-        }, config=config)
-
-        print("\n" + "=" * 60)
-        print("📨 Follow-up Response (same thread - has context):")
-        print("=" * 60)
-        for message in response2["messages"]:
-            print(message.content)
-            print("-" * 40)
-
+        while True:
+            # Get user input
+            try:
+                user_input = input("You: ").strip()
+            except EOFError:
+                break
+            
+            if not user_input:
+                continue
+            
+            # Handle commands
+            if user_input.lower() in ["/quit", "/exit"]:
+                print("\n👋 Goodbye! Your conversation has been saved.")
+                print(f"   To resume, use Thread ID: {thread_id}")
+                break
+            
+            elif user_input.lower() == "/help":
+                print_help()
+                continue
+            
+            elif user_input.lower() == "/samples":
+                print_sample_prompts()
+                continue
+            
+            elif user_input.lower() == "/new":
+                thread_id = str(uuid.uuid4())[:8]
+                current_config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+                print(f"\n🆕 Started new conversation thread: {thread_id}\n")
+                continue
+            
+            elif user_input.lower().startswith("/thread "):
+                new_thread = user_input[8:].strip()
+                if new_thread:
+                    thread_id = new_thread
+                    current_config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+                    print(f"\n🔄 Switched to thread: {thread_id}\n")
+                else:
+                    print("\n⚠️ Please provide a thread ID. Example: /thread abc123\n")
+                continue
+            
+            elif user_input.lower() == "/history":
+                messages = get_conversation_history(thread_id, user_id)
+                if messages:
+                    print("\n" + "=" * 60)
+                    print("📜 Conversation History:")
+                    print("=" * 60)
+                    for msg in messages:
+                        role = "You" if isinstance(msg, HumanMessage) else "Bot"
+                        if hasattr(msg, 'content') and msg.content:
+                            print(f"{role}: {msg.content[:200]}{'...' if len(msg.content) > 200 else ''}")
+                            print("-" * 40)
+                    print("=" * 60 + "\n")
+                else:
+                    print("\n📭 No conversation history found for this thread.\n")
+                continue
+            
+            elif user_input.lower() == "/clear":
+                import os
+                os.system('clear' if os.name != 'nt' else 'cls')
+                print(f"🌍 Travel Planner Chatbot | User: {user_id} | Thread: {thread_id}")
+                print("=" * 60 + "\n")
+                continue
+            
+            elif user_input.startswith("/"):
+                print(f"\n⚠️ Unknown command: {user_input}")
+                print("   Type /help to see available commands.\n")
+                continue
+            
+            # Process the message through the chatbot
+            try:
+                print("\n🤔 Thinking...\n")
+                response = graph.invoke({
+                    "messages": [HumanMessage(content=user_input)],
+                    "language": language
+                }, config=current_config)
+                
+                # Get the last AI message
+                ai_messages = [msg for msg in response["messages"] if isinstance(msg, AIMessage)]
+                if ai_messages:
+                    last_response = ai_messages[-1]
+                    print(f"Bot: {last_response.content}\n")
+                else:
+                    print("Bot: I processed your request but have no response to show.\n")
+                    
+            except Exception as e:
+                print(f"\n❌ Error processing message: {str(e)}")
+                print("   Please try again.\n")
+    
+    except KeyboardInterrupt:
+        print("\n\n👋 Interrupted! Goodbye!")
+    
     finally:
         # Clean up MongoDB connection
         mongo_client.close()
-        print("\n✅ MongoDB connection closed.")
+        print("✅ MongoDB connection closed.")
 
 
 def get_conversation_history(thread_id: str, user_id: str):
