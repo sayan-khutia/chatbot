@@ -9,14 +9,15 @@ from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel
 from typing import Optional, Annotated
 from langgraph.graph.message import add_messages
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.store.memory import InMemoryStore
+from langgraph.checkpoint.mongodb import MongoDBSaver
+from langgraph.store.mongodb import MongoDBStore
 from langchain_core.runnables import RunnableConfig
 from langgraph.store.base import BaseStore
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from langchain_core.tools import tool, InjectedToolCallId
+from pymongo import MongoClient
 
 load_dotenv()
 
@@ -479,9 +480,23 @@ graph_builder.add_edge("tools", "llm_call")
 graph_builder.add_edge("update_user_memory", END)
 graph_builder.add_edge("update_agent_memory", END)
 
-memory = InMemorySaver()
-in_memory_store = InMemoryStore()
-graph = graph_builder.compile(checkpointer=memory, store=in_memory_store)
+# MongoDB connection - set MONGODB_URI in your .env file
+# Default to local MongoDB instance if not set
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("MONGODB_DB_NAME", "chatbot_db")
+
+# Initialize MongoDB client
+mongo_client = MongoClient(MONGODB_URI)
+
+# MongoDB Checkpointer for conversation state (short-term memory)
+# This persists the graph state after each step, allowing conversations to resume
+checkpointer = MongoDBSaver(mongo_client, db_name=DB_NAME)
+
+# MongoDB Store for user/agent summaries (long-term memory)
+# This stores the user preferences and agent insights across sessions
+mongodb_store = MongoDBStore(mongo_client[DB_NAME]["long_term_memory"])
+
+graph = graph_builder.compile(checkpointer=checkpointer, store=mongodb_store)
 
 config = {"configurable": {"thread_id": "1", "user_id": "1"}}
 config_2 = {"configurable": {"thread_id": "2", "user_id": "1"}}
@@ -491,22 +506,85 @@ def main():
     """Main function to run the chatbot with example queries."""
     print("=" * 60)
     print("🌍 Travel Planner Chatbot - Starting...")
+    print(f"📦 Connected to MongoDB: {MONGODB_URI}")
+    print(f"📁 Database: {DB_NAME}")
     print("=" * 60)
     
-    # Example: Weather query
-    response = graph.invoke({
-        "messages": [
-            HumanMessage(content="Hi can you tell me about the weather in bali from 25th July 2026 to 30th July 2026?"),
-        ], 
-        "language": "English"
-    }, config=config)
+    try:
+        # Example: Weather query - First conversation
+        print("\n🗣️ First message in conversation thread 1...")
+        response = graph.invoke({
+            "messages": [
+                HumanMessage(content="Hi can you tell me about the weather in bali from 25th July 2026 to 30th July 2026?"),
+            ], 
+            "language": "English"
+        }, config=config)
 
-    print("\n" + "=" * 60)
-    print("📨 Response Messages:")
-    print("=" * 60)
-    for message in response["messages"]:
-        print(message.content)
-        print("-" * 40)
+        print("\n" + "=" * 60)
+        print("📨 Response Messages:")
+        print("=" * 60)
+        for message in response["messages"]:
+            print(message.content)
+            print("-" * 40)
+
+        # Example: Continue the same conversation - demonstrating persistence
+        print("\n🗣️ Continuing conversation thread 1 (agent remembers context)...")
+        response2 = graph.invoke({
+            "messages": [
+                HumanMessage(content="What hotels are available there?"),
+            ], 
+            "language": "English"
+        }, config=config)
+
+        print("\n" + "=" * 60)
+        print("📨 Follow-up Response (same thread - has context):")
+        print("=" * 60)
+        for message in response2["messages"]:
+            print(message.content)
+            print("-" * 40)
+
+    finally:
+        # Clean up MongoDB connection
+        mongo_client.close()
+        print("\n✅ MongoDB connection closed.")
+
+
+def get_conversation_history(thread_id: str, user_id: str):
+    """
+    Retrieve past conversation history from MongoDB.
+    
+    Args:
+        thread_id: The conversation thread identifier
+        user_id: The user identifier
+    
+    Returns:
+        List of messages from the conversation
+    """
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    state = graph.get_state(config)
+    if state and state.values:
+        return state.values.get("messages", [])
+    return []
+
+
+def list_user_threads(user_id: str):
+    """
+    List all conversation threads for a user from MongoDB.
+    
+    Note: This queries the checkpoints collection directly.
+    
+    Args:
+        user_id: The user identifier
+    
+    Returns:
+        List of thread IDs
+    """
+    db = mongo_client[DB_NAME]
+    checkpoints = db["checkpoints"]
+    
+    # Find distinct thread_ids for the user
+    threads = checkpoints.distinct("thread_id", {"metadata.user_id": user_id})
+    return threads
 
 
 if __name__ == "__main__":
